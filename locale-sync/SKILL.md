@@ -1,6 +1,6 @@
 ---
 name: locale-sync
-description: 使用主文件（默认 zh-CN）同步多语言 locale 文件，确保 key 一致性，翻译缺失 key，并对齐文件结构。
+description: 使用主文件（默认 zh-CN-GJ）同步多语言 locale 文件，确保 key 一致性，翻译缺失 key，并对齐文件结构。
 ---
 
 # i18n 多语言同步技能
@@ -9,25 +9,59 @@ description: 使用主文件（默认 zh-CN）同步多语言 locale 文件，�
 
 ## 配置
 
-- **默认主文件**：`utils/locale/zh-CN.js`
+- **默认主文件**：`utils/locale/zh-CN-GJ.js`（国产版本，使用"占卜断事"等术语）
 - **目标目录**：`utils/locale/`
-- **目标语言**：全部 14 个 locale 文件（zh-CN, zh-TW, zh-CN-GJ, en-US, ja-JP, ko-KR, es-ES, fr-FR, de-DE, tr-TR, ru-RU, pt-BR, it-IT, id-ID）
-- **注意**：`zh-CN-GJ.js` 是国产版本，使用"占卜断事"而非"占卜问事"等术语差异
+- **目标语言**：全部 28 个 locale 文件（见下方完整列表）
 - **项目路径**：`/Users/mo/Documents/uniapp/guojisuansuan/`
+
+### 完整 locale 文件列表（28 个）
+
+| 文件 | 语言 | 文件 | 语言 |
+|------|------|------|------|
+| `zh-CN-GJ.js` | 简体中文（主文件/国产版） | `zh-CN.js` | 简体中文（国际版） |
+| `zh-TW.js` | 繁體中文 | `en-US.js` | English |
+| `ja-JP.js` | 日本語 | `ko-KR.js` | 한국어 |
+| `es-ES.js` | Español | `fr-FR.js` | Français |
+| `de-DE.js` | Deutsch | `de-AT.js` | Österreichisches Deutsch |
+| `it-IT.js` | Italiano | `pt-BR.js` | Português (BR) |
+| `pt-PT.js` | Português (PT) | `ru-RU.js` | Русский |
+| `tr-TR.js` | Türkçe | `id-ID.js` | Bahasa Indonesia |
+| `es-CL.js` | Español (Chile) | `fil-PH.js` | Filipino |
+| `ms-MY.js` | Bahasa Melayu | `th-TH.js` | ไทย |
+| `hu-HU.js` | Magyar | `pl-PL.js` | Polski |
+| `cs-CZ.js` | Čeština | `sk-SK.js` | Slovenčina |
+| `ro-RO.js` | Română | `bg-BG.js` | Български |
+| `el-GR.js` | Ελληνικά | `ga-IE.js` | Gaeilge |
+
+### zh-CN vs zh-CN-GJ 术语差异
+
+`zh-CN-GJ.js` 是国产版本，与 `zh-CN.js`（国际版）key 结构完全一致，但存在术语差异：
+
+| 场景 | zh-CN（国际版） | zh-CN-GJ（国产版/主文件） |
+|------|-----------------|--------------------------|
+| 应用名 | 算了么 | 算算玄学 |
+| 功能名称 | 探索 | 占卜解惑/断事 |
+| 操作按钮 | 探索 | 起卦断事 |
+| 状态描述 | 测算中 | 起卦中 |
+| 次数用完 | 探索次数已用完 | 占卜解惑次数已用完 |
 
 ## 核心原则：必须分批处理
 
-> **重要**：14 个 locale 文件每个约 1500+ 行，全部读取会超出上下文限制。
+> **重要**：28 个 locale 文件每个约 1600+ 行，全部读取会超出上下文限制。
 > **必须**按以下策略分批处理，每批 2-3 个文件，不可一次性读取所有文件。
 
 ### 推荐批次划分
 
 | 批次 | 文件 | 说明 |
 |------|------|------|
-| 第 1 批 | `zh-TW.js`, `es-ES.js`, `fr-FR.js` | 中文+欧洲语言 |
-| 第 2 批 | `de-DE.js`, `it-IT.js`, `pt-BR.js` | 欧洲语言 |
-| 第 3 批 | `ja-JP.js`, `ko-KR.js`, `id-ID.js` | 亚洲语言 |
-| 第 4 批 | `tr-TR.js`, `ru-RU.js` | 其他语言 |
+| 第 1 批 | `zh-TW.js`, `zh-CN.js` | 中文类 |
+| 第 2 批 | `ja-JP.js`, `ko-KR.js` | 中日韩 |
+| 第 3 批 | `en-US.js`, `id-ID.js`, `ms-MY.js` | 英语系+东南亚 |
+| 第 4 批 | `es-ES.js`, `es-CL.js`, `pt-BR.js`, `pt-PT.js` | 西葡语系 |
+| 第 5 批 | `fr-FR.js`, `de-DE.js`, `de-AT.js`, `it-IT.js` | 西欧语言 |
+| 第 6 批 | `ru-RU.js`, `tr-TR.js`, `pl-PL.js`, `cs-CZ.js`, `sk-SK.js` | 中东欧语言 |
+| 第 7 批 | `ro-RO.js`, `bg-BG.js`, `el-GR.js`, `hu-HU.js` | 东欧/巴尔干语言 |
+| 第 8 批 | `th-TH.js`, `fil-PH.js`, `ga-IE.js` | 亚洲/特殊语言 |
 
 ### 每批次的处理流程
 
@@ -39,7 +73,7 @@ description: 使用主文件（默认 zh-CN）同步多语言 locale 文件，�
 
 ### 避免上下文溢出的技巧
 
-- **不要** `Read` 整个 locale 文件（1500+ 行）
+- **不要** `Read` 整个 locale 文件（1600+ 行）
 - **不要** 一次读取多个完整文件
 - **用 Grep** 先定位行号，再用 `Read` + `offset/limit` 读局部
 - **用并行工具调用** 在同一批次中同时处理多个文件（Grep 并行、Edit 并行）
@@ -66,14 +100,14 @@ def extract_keys(filepath):
         if match:
             keys.append(match.group(1))
     return keys
-zh_keys = set(extract_keys('zh-CN.js'))
-print(f'zh-CN.js 总 key 数: {len(zh_keys)}\n')
+master_keys = set(extract_keys('zh-CN-GJ.js'))
+print(f'zh-CN-GJ.js 总 key 数: {len(master_keys)}\n')
 for fn in sorted(os.listdir('.')):
-    if not fn.endswith('.js') or fn == 'zh-CN.js':
+    if not fn.endswith('.js') or fn == 'zh-CN-GJ.js':
         continue
     target_keys = set(extract_keys(fn))
-    missing = zh_keys - target_keys
-    extra = target_keys - zh_keys
+    missing = master_keys - target_keys
+    extra = target_keys - master_keys
     if missing or extra:
         print(f'⚠️  {fn:20s} | 缺失 {len(missing):2d} 个, 多余 {len(extra):2d} 个 | 缺失: {sorted(missing)[:5]}')
     else:
@@ -90,9 +124,9 @@ for fn in sorted(os.listdir('.')):
 例如缺失 `suggest` 对象：
 ```bash
 # 先定位
-grep -n "^suggest:" zh-CN.js
+grep -n "^suggest:" zh-CN-GJ.js
 # 再局部读取
-# Read zh-CN.js offset=行号 limit=20
+# Read zh-CN-GJ.js offset=行号 limit=20
 ```
 
 ### 步骤 3：按批次补充缺失 key
@@ -121,19 +155,34 @@ wc -l *.js | sort -n
 ## 文件头注释对照表
 
 ```javascript
-zh-CN:  /**\n * 简体中文语言包\n */
-zh-TW:  /**\n * 繁體中文語言包\n */
-en-US:  /**\n * English Language Pack\n */
-ja-JP:  /**\n * 日本語言語パック\n */
-ko-KR:  /**\n * 한국어 언어 팩\n */
-es-ES:  /**\n * Paquete de idioma español\n */
-fr-FR:  /**\n * Paquet de langue française\n */
-de-DE:  /**\n * Deutsches Sprachpaket\n */
-tr-TR:  /**\n * Türkçe dil paketi\n */
-ru-RU:  /**\n * Пакет русского языка\n */
-pt-BR:  /**\n * Pacote de idioma português\n */
-it-IT:  /**\n * Pacchetto di lingua italiana\n */
-id-ID:  /**\n * Paket bahasa Indonesia\n */
+zh-CN-GJ: /**\n * 简体中文语言包\n */
+zh-CN:    /**\n * 简体中文语言包\n */
+zh-TW:    /**\n * 繁體中文語言包\n */
+en-US:    /**\n * English Language Pack\n */
+ja-JP:    /**\n * 日本語言語パック\n */
+ko-KR:    /**\n * 한국어 언어 팩\n */
+es-ES:    /**\n * Paquete de idioma español\n */
+fr-FR:    /**\n * Paquet de langue française\n */
+de-DE:    /**\n * Deutsches Sprachpaket\n */
+de-AT:    /**\n * Österreichisches Deutsch Sprachpaket\n */
+tr-TR:    /**\n * Türkçe dil paketi\n */
+ru-RU:    /**\n * Пакет русского языка\n */
+pt-BR:    /**\n * Pacote de idioma português\n */
+pt-PT:    /**\n * Pacote de idioma português (Portugal)\n */
+it-IT:    /**\n * Pacchetto di lingua italiana\n */
+id-ID:    /**\n * Paket bahasa Indonesia\n */
+es-CL:    /**\n * Paquete de idioma español (Chile)\n */
+fil-PH:   /**\n * Paket ng wikang Filipino\n */
+ms-MY:    /**\n * Pakej bahasa Melayu\n */
+th-TH:    /**\n * ชุดภาษาไทย\n */
+hu-HU:    /**\n * Magyar nyelvi csomag\n */
+pl-PL:    /**\n * Polski pakiet językowy\n */
+cs-CZ:    /**\n * Český jazykový balíček\n */
+sk-SK:    /**\n * Slovenský jazykový balíček\n */
+ro-RO:    /**\n * Pachet de limbă română\n */
+bg-BG:    /**\n * Български езиков пакет\n */
+el-GR:    /**\n * Ελληνικό γλωσσικό πακέτο\n */
+ga-IE:    /**\n * Pacáiste Gaeilge\n */
 ```
 
 ## 常见问题速查
@@ -142,7 +191,7 @@ id-ID:  /**\n * Paket bahasa Indonesia\n */
 |------|----------|----------|
 | 缺失 key | 运行步骤 1 的 Python 脚本 | 按批次 Edit 补充 |
 | 多余 key | 运行步骤 1 的 Python 脚本 | Edit 删除对应行 |
-| JS 语法错误 | `node --check file.js` | 检查大括号数量（标准：140开/140闭） |
+| JS 语法错误 | `node --check file.js` | 检查大括号数量 |
 | 行数不一致 | `wc -l *.js \| sort -n` | 检查文件末尾换行符、空行 |
 | 文件头语言错误 | 打开文件检查前 3 行 | Edit 替换为正确语言注释 |
 
@@ -154,8 +203,6 @@ for f in *.js; do
   echo "$f: $(python3 -c "with open('$f', 'r') as c: print(f'{c.read().count(\"{\")}/{c.read().count(\"}\")}')")"
 done
 ```
-
-标准值：**140 / 140**
 
 ### 文件末尾格式统一
 
@@ -180,8 +227,9 @@ for filename in [f for f in os.listdir('.') if f.endswith('.js')]:
 
 | 工具 | 说明 |
 |------|------|
-| `locale_manager.py` | 统一管理工具（推荐） |
-| `check_keys.py` | Key 一致性检查工具 |
+| `locale_manager.py` | 统一管理工具（推荐，已改用 zh-CN-GJ.js 为主文件） |
+| `check_keys.py` | Key 一致性检查工具（已改用 zh-CN-GJ.js 为主文件） |
+| `translate_ga.py` | 爱尔兰语翻译辅助工具 |
 
 ```bash
 # 完整检查（推荐）
@@ -196,8 +244,7 @@ python3 /path/to/skills/locale-sync/locale_manager.py fix-trailing
 
 ## 验证清单
 
-- [ ] 所有 14 个 locale 文件存在
-- [ ] Key 与 zh-CN.js 完全一致（运行步骤 1 脚本）
+- [ ] 所有 28 个 locale 文件存在
+- [ ] Key 与 zh-CN-GJ.js 完全一致（运行步骤 1 脚本）
 - [ ] 所有文件 `node --check` 语法通过
-- [ ] 大括号数量 140/140
 - [ ] 文件头与各自语言匹配

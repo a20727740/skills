@@ -54,7 +54,7 @@ def compare_with_master(master_file, target_file):
 
 def main():
     locale_dir = os.path.dirname(os.path.abspath(__file__))
-    master_file = os.path.join(locale_dir, 'zh-CN.js')
+    master_file = os.path.join(locale_dir, 'zh-CN-GJ.js')
 
     # 获取所有 .js 文件
     all_files = [f for f in os.listdir(locale_dir)
@@ -63,7 +63,7 @@ def main():
     print("=" * 80)
     print("多语言文件 Key 一致性检查")
     print("=" * 80)
-    print(f"\n主文件: zh-CN.js")
+    print(f"\n主文件: zh-CN-GJ.js")
     print(f"检查文件数量: {len(all_files)}\n")
 
     results = {}

@@ -26,7 +26,7 @@ class LocaleManager:
         else:
             self.locale_dir = Path(locale_dir)
 
-        self.master_file = self.locale_dir / 'zh-CN.js'
+        self.master_file = self.locale_dir / 'zh-CN-GJ.js'
 
     def get_all_locale_files(self):
         """获取所有 locale 文件列表"""
