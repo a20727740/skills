@@ -1,333 +1,237 @@
 ---
-name: mcp-bridge-guide
-description: 桥接管理器 MCP 使用指南 - 架构AI只做分析与拆解，所有实现必须分发给Worker执行
-version: 5.0.0
-tags: [mcp, bridge, ai, proxy, multi-provider, multimodal]
+name: MCP Bridge Guide
+description: 桥接管理器 MCP 使用指南 - 多供应商协作、任务分配、内部执行、外部审核
+version: 1.0.0
+tags: [mcp, bridge, ai, proxy, multi-provider]
 ---
 
 # 桥接管理器 MCP 使用指南
 
 ## 概述
 
-桥接管理器（Bridge Manager）是一个 macOS 状态栏应用，将多个 AI 供应商统一为本地 API。外部 AI 应用（如 Claude Code）通过 **5200 端口**的 MCP Server 连接，用极简别名（`"1号"`、`"2号"`）调度内部 Worker。
-
-## 核心铁律（唯一权威定义）
-
-> **架构AI只做分析和拆解，绝不动手实现。所有编码、修改、实现工作必须分发给 Worker。**
-
-架构AI（Claude Code 自身）**禁止**调用 `write_to_file` / `replace_file_content` / `multi_replace_file_content` / `run_command`。
-
-架构AI**唯一职责**：分析 → 拆解 → 注入上下文 → `assign_task` 分发 → 审核 Worker 结果。
-
-**违规检测口诀**：如果我下一步要「改文件」或「跑命令」，那我就违规了。停下来，走 assign_task。
-
-> 以下各章节均引用本铁律，不另行重复。
-
-### 请求分类
-
-收到请求后先判断类型：
-- **纯信息查询**（解释概念、回答问题）→ 可自行回答，标注 `[Worker: 未派任务]`
-- **代码修改/文件操作/功能实现** → **必须走 Worker 流程**，标注 `[Worker: 已派任务]`
+桥接管理器（Bridge Manager）是一个 macOS 状态栏应用，将多个 AI 供应商（DeepSeek、Kimi、智谱等）统一为本地 OpenAI 兼容 API。外部 AI 应用可通过 MCP 端口连接，实现**任务分配 → 内部执行 → 整理结果 → 外部审核**的完整工作流。
 
 ## 架构
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│         架构AI (Claude Code) — 分析者 / 调度者 / 审核者       │
-│                                                               │
-│  ① 接收用户输入（文字 + 截图/图片）                            │
-│  ② 多模态识别：用自身视觉能力分析截图，提取为文字              │
-│  ③ 任务拆解：拆分为独立原子任务                                │
-│  ④ 调用 assign_task 分发给 Worker（见核心铁律）                │
-│  ⑤ 审核 Worker 返回结果                                       │
-└───────────────────────────┬──────────────────────────────────┘
-                            │ assign_task（含 project_path + context_files）
-                            │ (stdio / HTTP SSE @ 5200)
-                            ▼
-┌──────────────────────────────────────────────────────────────┐
-│           MCP Server Orchestrator (:5200)                     │
-│             (解析 1号、2号 等协作别名)                          │
-└─────┬─────────────────────┬─────────────────────┬────────────┘
-      │                     │                     │
-      ▼ (1号 @ :5100)       ▼ (2号 @ :5101)       ▼ (3号 @ :5102)
-┌───────────┐         ┌───────────┐         ┌───────────┐
-│ [权]      │         │ [权]      │         │ [权]      │
-│ glm-5.1   │         │ glm-5-turb│         │ glm-5     │
-│ :5100     │         │ :5101     │         │ :5102     │
-│ 执行者    │         │ 执行者    │         │ 执行者    │
-└─────┬─────┘         └─────┬─────┘         └─────┬─────┘
-      │                     │                     │
-      ▼                     ▼                     ▼
-  智谱 GLM              智谱 GLM              智谱 GLM
+┌─────────────────────────────────────────────────────────┐
+│                    外部 AI 应用                          │
+│          （架构师 / 审核者角色）                          │
+│         通过 MCP 端口 5200 连接                          │
+└──────────┬──────────────────────────┬───────────────────┘
+           │ 分配任务                  │ 审核结果
+           ▼                          │
+┌──────────────────────────────────────┴──────────────────┐
+│              桥接管理器 (MCP 服务)                        │
+│                                                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
+│  │ DeepSeek    │  │ Kimi K2.6   │  │ 智谱 GLM-5  │     │
+│  │ :5100       │  │ :5100       │  │ :5100       │     │
+│  │ (执行者)     │  │ (审核者)     │  │ (执行者)     │     │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘     │
+│         │                │                │             │
+│         └────────────────┴────────────────┘             │
+│                     │                                   │
+│              整理数据 & 通知外部 AI                       │
+└─────────────────────────────────────────────────────────┘
 ```
-
-## 协作别名与端口映射表
-
-| 别名 | 供应商名称 | 默认模型 | 端口 | 擅长领域 |
-|:---:|:---|:---|:---:|:---|
-| **1号** | `[权] glm-5.1` | `glm-5.1` | **5100** | 复杂逻辑、算法、架构代码 |
-| **2号** | `[权] glm-5-turbo` | `glm-5-turbo` | **5101** | 快速修复、简单代码、格式化 |
-| **3号** | `[权] glm-5` | `glm-5` | **5102** | 常规任务、文档、测试 |
-| **4号** | `[权] glm-4.7` | `glm-4.7` | **5103** | 简单问答、轻量脚本 |
-| **5号** | `[权] deepseek-v4-pro[1m]` | `deepseek-v4-pro[1m]` | **5104** | 复杂推理、数学、长链逻辑 |
-| **6号** | `[权] deepseek-v4-flash` | `deepseek-v4-flash` | **5105** | 极简任务、快速验证 |
-| **7号** | `[权-联通] glm-5` | `glm-5` | **5106** | 3号繁忙时的替代 |
-| **8号** | `[伟] kimi-for-2.6` | `kimi-for-2.6` | **5107** | 长文档、多模态降级备选 |
-| **9号** | `[伟] kimi-for-2.5` | `kimi-for-2.5` | **5108** | 常规任务 |
-
-> 用户未指定 Worker 时，**默认使用 `"1号"`**。
-
-## Worker 环境与安全边界
-
-Worker 运行在隔离沙箱中，与架构AI的本地文件系统完全隔离：
-
-- **无文件系统访问**：Worker 看不到项目文件，必须通过 `context_files` 参数注入所需文件内容
-- **无网络访问**：Worker 不能调用外部 API 或访问网络资源
-- **无持久状态**：每次任务执行独立，Worker 不保留上一次任务的上下文
-- **仅输出代码/文本**：Worker 的职责是生成代码或分析结果，不直接修改任何文件
-
-因此架构AI**必须**通过 `context_files` 传入所有 Worker 需要的文件，否则 Worker 无法完成任务。
 
 ## 工作流程
 
-### 第一步：分析（架构AI）
+### 1. 内部执行任务
+- 外部 AI 通过 MCP 端口下达任务到指定供应商
+- 供应商（执行者角色）独立完成任务
+- 桥接自动记录所有输入/输出到终端日志
 
-1. **多模态识别**
-   - 用户附带截图/图片时，架构AI用自身视觉能力分析
-   - 提取为结构化文字描述
-   - **不把图片传给 Worker**，只传文字分析结果
+### 2. 整理数据
+- 任务完成后，桥接自动整理执行结果
+- 汇总关键信息：输入摘要、输出内容、耗时、token 用量
+- 生成结构化的审核报告
 
-2. **需求拆解**
-   - 将复杂需求拆为独立的原子任务
-   - 每个任务目标单一、边界清晰
-   - 判断任务依赖关系和执行顺序
+### 3. 通知外部 AI 审核
+- 整理好的数据通过 MCP 推送给外部 AI
+- 外部 AI 以审核者角色评估工作质量
+- 审核结果可反馈给执行者进行修正
 
-3. **上下文收集**
-   - 用 `context_files` 收集需要修改的文件路径
-   - 确认 `project_path`（当前项目绝对路径）
-   - 确认 `project_language`（语言/框架）
+## 配置文件
 
-### 第二步：分发（架构AI → Worker）
+### providers.json — 供应商配置
 
-调用 `assign_task` 分发任务，所有实现工作都由 Worker 完成：
-
-```json
-{
-  "provider_id": "1号",
-  "task": "在 LoginForm.tsx 的密码框下方添加'记住我'复选框...",
-  "project_path": "/Users/mo/projects/my-app",
-  "project_language": "TypeScript/React",
-  "context_files": ["src/components/LoginForm.tsx"],
-  "auto_checkpoint": true
-}
-```
-
-#### 并行分发与依赖判断
-
-无依赖的多个任务可同时分发给不同 Worker。判断依赖关系：
-
-| 无依赖（可并行） | 有依赖（需串行） |
-|---|---|
-| 修改不同文件 | 任务 B 需要任务 A 的输出作为输入 |
-| 修改同一文件的不同部分（不重叠） | 任务 B 依赖 A 创建的新函数/类型 |
-| 独立的样式修改 vs 独立的逻辑修改 | 任务 A 修改了 B 引用的接口定义 |
-
-**原则**：拿不准时串行，安全优先。
-
-### 第三步：审核（架构AI）
-
-Worker 返回结果后，架构AI按以下标准审核：
-
-| 审核项 | 判断标准 |
-|---|---|
-| **功能完整性** | 是否完成了 task 描述的全部要求 |
-| **代码风格** | 是否与 context_files 中的现有风格一致（缩进、命名、框架用法） |
-| **逻辑正确性** | 无明显 bug、空指针、未处理异常 |
-| **安全性** | 不引入 SQL 注入、XSS、硬编码密钥等风险 |
-| **最小改动** | 只修改必要的部分，不做额外重构 |
-
-审核结果：
-- **合格** → 架构AI将代码落地应用（这是唯一允许架构AI操作代码的时刻）
-- **不合格** → `review_checkpoint(reject)` 或重新 `assign_task` 打回，附具体修改意见
-
-### 错误处理
-
-| 异常场景 | 处理策略 |
-|---|---|
-| Worker 无响应 / 超时（>60s） | 重试 1 次 → 切换同能力 Worker（如 1号→7号）→ 仍失败则向用户汇报 |
-| Worker 返回格式错误 | 重试 1 次，在 task 中明确要求输出格式 → 仍失败则向用户汇报 |
-| Worker 返回不完整代码 | 打回重做，附具体缺失说明 → 最多 5 次 → 向用户汇报 |
-| Worker 连续 5 次不合格 | 停止循环，汇总失败原因，向用户汇报并建议方案 |
-| 目标 Worker 已停止 | 先 `bridge_start` 启动 → 启动失败则切换其他 Worker |
-| 所有 Worker 不可用 | 向用户汇报，建议检查 Bridge Manager 应用状态 |
-
-**降级原则**：优先同能力 Worker 替换（1号↔7号），其次降级到能力稍弱但可用的 Worker。
-
-### 图片识别降级策略
-
-仅当架构AI自身无法识别时（极模糊、专业图表、手写体），才降级让 Worker（如 8号 Kimi）尝试。
-
----
-
-## MCP 工具列表
-
-### bridge_status — 查看运行状态
-
-```json
-// 输入: {}
-// 输出示例:
-🟢 运行中  [权] glm-5.1 (export_02aaa593)  端口:5100 PID:12345
-⚪ 已停止  [权] glm-5-turbo (export_47545d61)  端口:5101
-```
-
-### bridge_start — 启动桥接
-
-```json
-{ "provider_id": "1号" }
-```
-
-### bridge_stop — 停止桥接
-
-```json
-{ "provider_id": "1号" }
-```
-
-### assign_task — 分配执行任务（核心工具）
-
-向 Worker 发送任务。架构AI的所有实现工作都必须通过此工具完成（见核心铁律）。
+位于桥接目录下，定义可用的 AI 供应商：
 
 ```json
 {
-  "provider_id": "1号",
-  "task": "[架构AI已拆解好的、包含完整上下文的纯文本任务描述]",
-  "project_path": "/Users/mo/Documents/mac/data/CodeIDE",
-  "project_language": "Swift/SwiftUI",
-  "context_files": ["Sources/Views.swift"],
-  "skills": ["coding-style"],
-  "model": "glm-5.1",
-  "auto_checkpoint": true
+  "providers": [
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "apiKey": "sk-xxx",
+      "baseUrl": "https://api.deepseek.com",
+      "defaultModel": "deepseek-v4-pro",
+      "port": 5100,
+      "protocol": "openai",
+      "models": [
+        { "id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro", "description": "高性能推理模型" }
+      ],
+      "capabilities": {
+        "thinking": true,
+        "reasoningEffort": true,
+        "reasoningContent": true
+      }
+    }
+  ]
 }
 ```
 
-| 参数 | 必填 | 说明 |
-|------|:---:|------|
-| `provider_id` | 是 | Worker 别名（如 `"1号"`） |
-| `task` | 是 | 已分析好的纯文本任务描述 |
-| `project_path` | 是 | 调用者所在项目绝对路径 |
-| `project_language` | 推荐 | 语言/框架（如 `Swift/SwiftUI`） |
-| `context_files` | 推荐 | 相对或绝对路径，系统自动读取注入（Worker 无文件系统访问） |
-| `skills` | 可选 | 技能规范文件路径 |
-| `model` | 可选 | 覆盖默认模型 |
-| `auto_checkpoint` | 可选 | 自动创建审核点（默认 true） |
+**关键字段说明：**
+- `protocol`: `openai` 或 `anthropic`，决定请求转换格式
+- `port`: 本地监听端口，同一供应商复用端口
+- `capabilities.thinking`: 是否支持深度思考
+- `capabilities.reasoningEffort`: 是否支持调节推理强度
 
-### create_checkpoint — 手动创建审核点
+### mcp-config.json — MCP 服务配置
 
 ```json
-{ "alias": "1号", "summary": "任务摘要", "detail": "[代码或日志]" }
+{
+  "allowExternalReview": true,
+  "isEnabled": false,
+  "monitorAllIO": true,
+  "port": 5200,
+  "providerAssignments": [
+    {
+      "id": "uuid",
+      "providerId": "deepseek",
+      "taskRole": "worker",
+      "taskDescription": "代码编写和实现",
+      "isEnabled": true
+    }
+  ]
+}
 ```
 
-### list_checkpoints — 列出审核点
+**角色类型：**
+- `worker`（执行者）— 接收任务并执行实际工作
+- `reviewer`（审核者）— 审核其他供应商的工作成果
+- `architect`（架构师）— 规划任务分解和分配策略
 
-```json
-{ "status": "pending", "limit": 10 }
+## 本地 API 端点
+
+每个供应商启动后，在 `127.0.0.1:{port}` 提供 OpenAI 兼容接口：
+
+| 端点 | 说明 |
+|------|------|
+| `GET /v1/models` | 获取可用模型列表 |
+| `POST /v1/chat/completions` | Chat Completions API（支持流式） |
+| `POST /v1/responses` | Responses API（支持流式 + 工具调用） |
+
+### 请求示例
+
+```bash
+# Chat Completions
+curl http://127.0.0.1:5100/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-v4-pro",
+    "messages": [{"role": "user", "content": "写一个排序算法"}],
+    "stream": true
+  }'
+
+# Responses API
+curl http://127.0.0.1:5100/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-v4-pro",
+    "input": "实现二叉树遍历",
+    "stream": true
+  }'
 ```
 
-### get_checkpoint_detail — 获取审核点详情
+## 使用方式
 
-```json
-{ "checkpoint_id": "..." }
-```
+### 启动桥接
 
-### review_checkpoint — 审核里程碑
+1. 点击状态栏「桥接管理」→「打开管理窗口」
+2. 左侧选择供应商，右侧点击「启动」
+3. 桥接在指定端口启动，终端实时显示日志
 
-```json
-{ "checkpoint_id": "...", "action": "approve", "feedback": "驳回原因" }
-```
+### MCP 管理
+
+1. 底部齿轮菜单 →「MCP 管理」进入全屏管理界面
+2. 配置 MCP 端口（默认 5200）
+3. 添加协作任务，指定供应商和角色
+4. 启动 MCP 服务
+
+### 监控与审核
+
+- **终端面板**：实时显示所有供应商的输入/输出
+- **外部审核**：开启后外部 AI 可读取执行结果并给出评审意见
+- **I/O 监控**：完整记录请求和响应，支持回溯排查
+
+## 供应商协议差异
+
+桥接自动处理 OpenAI 和 Anthropic 两种协议的转换：
+
+| 特性 | OpenAI (`openai`) | Anthropic (`anthropic`) |
+|------|-------------------|------------------------|
+| API 格式 | Chat Completions | Messages API |
+| 思考模式 | `reasoning_effort` 参数 | `thinking` 内容块 |
+| 工具调用 | function calling | tool_use 内容块 |
+| 流式响应 | SSE delta | SSE event blocks |
+
+Kimi 系列供应商使用 Anthropic 协议，桥接会自动转换请求格式。
+
+## 视觉能力
+
+供应商配置 `visionModel` 后，桥接自动启用视觉预处理：
+- 检测消息中的图片内容
+- 调用视觉模型生成文字描述
+- 将描述传给主模型处理
+- 自动缓存已处理图片
+
+## 导入导出
+
+- **导出**：底部工具栏「导出配置」→ 保存为 `models.json` 兼容格式
+- **导入**：支持两种格式：
+  - `providers.json`：`{"providers": [...]}` 格式
+  - `models.json`：模型管理器/CodeIDE 导出的纯数组格式
+
+导入时自动分配不冲突的端口，支持「替换全部」或「合并到现有」两种模式。
+
+## 提问与审核规范
+
+在使用 MCP 桥接将任务下发给 Worker 供应商时，作为调度者（提问者/外部 AI），必须严格遵循以下上下文与审核规则：
+
+### 1. 提问规范：全面上下文传递 (Context Injection)
+内部 Worker 运行在隔离环境中，并不知晓外部 AI 所在的目录结构、项目背景以及当前激活的技能（Skill）。因此，在通过 `assign_task` 等方式分配任务时，**提问者（外部 AI）必须在 prompt 中完整注入以下四大要素**：
+
+- **[必选] 绝对路径与环境**：显式提供当前项目的绝对物理路径（例如 `/Users/mo/Documents/...`）、操作系统环境、框架语言与版本信息。
+- **[必选] 技能（Skill）透传**：如果外部 AI 当前正在应用某项 Skill（如 `ui-ux-pro-max`、`locale-sync` 或本项目规约），**必须将该 Skill 的核心规则甚至完整内容**作为文本附加在 Prompt 中一并发送给 Worker，以保证“干活的人”和“调度的人”遵循相同的标准和审美要求。
+- **[必选] 角色与能力边界告知**：必须明确告知 Worker 它自己**没有直接修改文件或执行命令的能力**（除非独立为其配置了工具）。Worker 的职责是**输出完整的代码或分析结果**，再由提问者（外部 AI）在收到回复后去代为执行写入或运行测试。
+- **[必选] 相关文件与代码**：不能仅提供文件名！必须将需要修改或参考的核心代码内容、依赖文件（如 `package.json` 等）以代码块的形式完整传给 Worker，以供其分析。
+- **[可选] 额外限制与目标**：如果是写代码任务，必须告知是否有安装新依赖的允许、测试运行要求以及最终的成功验收标准。
+
+### 2. 外部审核与循环优化规则
+1. **角色定义**：外部 AI（即“提问者”或 Orchestrator）自动充当“审核者”角色。
+2. **评估标准**：每次 Worker 返回执行结果或代码修改后，审核者必须仔细阅读并评估其是否完全达标（逻辑是否正确、是否符合规范）。
+3. **循环打回（最多 5 次）**：如果 Worker 返回的内容未达标或有明显错误，审核者应通过 `review_checkpoint(reject)` 或者继续使用 `assign_task` 指出不足并要求 Worker 重新修改。对于同一个问题，这种打回与优化循环**最多可进行 5 次**。
+4. **终止条件**：在重试 5 次后，审核者需根据效果评估是否值得继续针对当前问题进行优化；若判定效果不佳或陷入死循环，应立即停止循环，向人工汇报或改变解决策略。
 
 ---
 
-## 完整工作流示例
-
-### 场景：用户说"登录页加个记住我复选框"
+## 文件结构
 
 ```
-═══ 架构AI 分析阶段（见核心铁律） ═══
-
-架构AI:
-  1. 读取 LoginForm.tsx → 收集上下文
-  2. 拆解任务：在密码框下方添加"记住我"复选框
-  3. 选择 Worker：1号（常规 UI 任务）
-
-═══ Worker 执行阶段 ═══
-
-架构AI → 1号: assign_task({
-  task: "在 LoginForm.tsx 的密码框下方添加'记住我'复选框。
-         样式：Tailwind，与输入框左对齐，文字'记住我'，checkbox 前置。
-         输出完整修改后的文件。",
-  project_path: "/Users/mo/projects/my-app",
-  project_language: "TypeScript/React",
-  context_files: ["src/components/LoginForm.tsx"]
-})
-
-═══ 架构AI 审核阶段 ═══
-
-1号 返回代码 → 架构AI按审核标准检查：
-  ✅ 功能完整 / 代码风格一致 / 逻辑正确 / 无安全风险 / 改动最小 → approve → 落地应用
+nodejs桥接/
+├── providers.json          # 供应商配置
+├── mcp-config.json         # MCP 服务配置（自动生成）
+├── model-catalog.json      # 模型目录
+├── universal-bridge.js     # 桥接核心（OpenAI 兼容代理）
+├── vision-mcp.js           # 视觉理解 MCP Server
+├── bridge.js               # 旧版桥接
+├── Sources/
+│   ├── BridgeManagerApp.swift    # 应用入口 + 状态栏
+│   └── BridgeToolWindow.swift    # 主界面 + 设置 + MCP 管理
+├── skills/
+│   └── 使用桥接mcp.md      # 本文档
+└── bridge-{id}.log         # 各供应商运行日志
 ```
-
-### 场景：用户发截图说"按照这个改"
-
-```
-═══ 架构AI 分析阶段 ═══
-
-架构AI:
-  1. 视觉识别截图 → 提取为文字：
-     - 蓝色主题 (#2563EB)
-     - 缺少"记住我"复选框
-     - 按钮不是 full width
-     - 颜色不匹配
-
-  2. 拆解为 3 个独立任务（修改不同部分，无依赖，可并行）：
-     任务A → 1号：添加复选框
-     任务B → 2号：按钮改 full width
-     任务C → 2号：修正颜色
-
-═══ Worker 并行执行 ═══
-
-架构AI → 1号: assign_task({ task: "添加复选框...", context_files: [...] })
-架构AI → 2号: assign_task({ task: "按钮改 w-full...", context_files: [...] })
-架构AI → 2号: assign_task({ task: "颜色改 #2563EB...", context_files: [...] })
-
-═══ 架构AI 审核阶段 ═══
-
-逐个按审核标准检查 → 全部 approve → 按顺序落地应用
-```
-
----
-
-## 调度规范
-
-### 架构AI 必须遵守
-
-1. **只分析不分发 = 失职**：分析完方向后，必须调用 `assign_task` 让 Worker 实现
-2. **`project_path` 必填**：传入当前项目绝对路径
-3. **`context_files` 尽量传全**：Worker 在隔离沙箱中，看不到项目文件（见"Worker 环境与安全边界"）
-4. **`project_language` 推荐**：帮助 Worker 选择正确语法和 API
-5. **默认 1 号**：用户未指定 Worker 时使用 `"1号"`
-
-### Worker 角色
-
-Worker 是纯执行者，只接收架构AI已消化的纯文本指令，输出代码或分析结果。由架构AI代为落地应用返回的代码。
-
----
-
-## 响应规范
-
-每次回复必须在开头标注 Worker 调度情况：
-
-```
-[Worker: 已派任务]  → 本回复涉及了 Worker 分发
-[Worker: 未派任务]  → 本回复仅由架构AI自身完成（仅限纯信息查询）
-```
-
-涉及代码修改/功能实现的需求，`[Worker: 未派任务]` 是违规的——必须分发。
